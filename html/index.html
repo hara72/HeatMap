@@ -1,0 +1,212 @@
+<?
+	include "dbinf.php";
+?>
+<head>
+<meta charset="UTF-8">
+<script src="/jquery-1.10.1.min.js"></script>
+<script type="text/javascript" src="//openapi.map.naver.com/openapi/v3/maps.js?ncpClientId=네이버맵api코드&submodules=visualization"></script>
+<script src="/MarkerClustering.js"></script>
+</head>
+<body>
+	
+	<div style="width:100px; height:0px; margin-top:0px">
+		
+	</div>
+
+	<div id="map" style="width:1500px; height:1000px; margin-top:0px">
+	</div>
+</body>
+<script>
+//지도를 삽입할 HTML 요소 또는 HTML 요소의 id를 지정합니다.
+// 교통정보량
+
+var mapDiv = document.getElementById('map'); // 'map'으로 선언해도 동일
+
+
+var map = new naver.maps.Map('map', {
+    center: new naver.maps.LatLng(33.48687251077224, 126.52249906885338),
+	zoom: 13,
+    mapTypeControl: true
+
+
+    }
+	);
+
+var trafficLayer = new naver.maps.TrafficLayer({
+    interval: 300000 // 5분마다 새로고침 (최소값 5분)
+});
+
+var btn = $('#traffic');
+
+naver.maps.Event.addListener(map, 'trafficLayer_changed', function(trafficLayer) {
+    if (trafficLayer) {
+        btn.addClass('control-on');
+        $("#autorefresh").parent().show();
+        $("#autorefresh")[0].checked = true;
+    } else {
+        btn.removeClass('control-on');
+        $("#autorefresh").parent().hide();
+    }
+});
+
+btn.on("click", function(e) {
+    e.preventDefault();
+
+    if (trafficLayer.getMap()) {
+        trafficLayer.setMap(null);
+    } else {
+        trafficLayer.setMap(map);
+    }
+});
+
+$("#autorefresh").on("click", function(e) {
+    var btn = $(this),
+        checked = btn.is(":checked");
+
+    if (checked) {
+        trafficLayer.startAutoRefresh();
+    } else {
+        trafficLayer.endAutoRefresh();
+    }
+});
+
+naver.maps.Event.once(map, 'init', function() {
+    trafficLayer.setMap(map);
+});
+
+
+
+
+var markers = [];
+var heatmap_data = [];
+var markerClustering;
+
+function sortingMapByGubun(crimGubun)
+{
+	var newMarkers = [];
+	for(var i=0; i < markers.length; i++)
+	{
+		markers[i].setMap(null);
+	}
+
+	if(crimGubun == "ALL")
+	{
+		for(var i=0; i < markers.length; i++)
+		{
+			markers[i].setMap(map);
+			newMarkers.push(markers[i]);
+		}
+	}
+	else
+	{
+		for(var i=0; i < markers.length; i++)
+		{
+			if(crimGubun == markers[i].title)
+			{
+				markers[i].setMap(map);
+				newMarkers.push(markers[i]);
+			}
+			else
+			{
+				markers[i].setMap(null);
+			}
+		}
+	}
+	markerCluster(newMarkers);
+	map.setZoom(4);
+}
+	// 1~3까지를 구분하여 지도에 표시되는 열선의 굵기를 조절
+function CustomMarker(lat, lng, ID, ubun, serious, Date, Time) {
+	//심각성 : 1 
+	var contents_html = "";
+	if(serious == 1)
+	{
+		contents_html = '<div style="padding-top:5px;padding-bottom:5px;padding-left:5px;padding-right:5px;background-color:#b12121; color:white; text-align:center;border:1px solid #831616; border-radius:14px; opacity:75%" onmouseover="javascript:over(\''+ID+'\');" onmouseout="javascript:out(\''+ID+'\');">' +
+							'<div style="font-weight: bold; font-size:14px"> '+Gubun+' </div>' +
+							'<div style="font-weight: normal; font-size:13px; margin-top:3px; display:none" id="'+ID+'"> '+Date+'<br/>'+Time+' </div>' +
+							'</div>';
+	}
+
+	//심각성 : 2
+	if(serious == 2)
+	{
+		contents_html = '<div style="padding-top:5px;padding-bottom:5px;padding-left:5px;padding-right:5px;background-color:#e0692f; color:white; text-align:center;border:1px solid #831616; border-radius:14px; opacity:75%" onmouseover="javascript:over(\''+ID+'\');" onmouseout="javascript:out(\''+ID+'\');">' +
+							'<div style="font-weight: bold; font-size:14px"> '+Gubun+' </div>' +
+							'<div style="font-weight: normal; font-size:13px; margin-top:3px; display:none" id="'+ID+'"> '+Date+'<br/>'+Time+' </div>' +
+							'</div>'; 
+	}
+
+	//심각성 : 3
+	if(serious == 3)
+	{
+		contents_html = '<div style="padding-top:5px;padding-bottom:5px;padding-left:5px;padding-right:5px;background-color:#d3cc07; color:white; text-align:center;border:1px solid #a09b07; border-radius:14px; opacity:75%" onmouseover="javascript:over(\''+ID+'\');" onmouseout="javascript:out(\''+ID+'\');">' +
+							'<div style="font-weight: bold; font-size:14px"> '+Gubun+' </div>' +
+							'<div style="font-weight: normal; font-size:13px; margin-top:3px; display:none" id="'+eID+'"> '+Date+'<br/>'+Time+' </div>' +
+							'</div>';
+	}
+
+	var marker = new naver.maps.Marker({
+		position: new naver.maps.LatLng(lat, lng),
+		map: map,
+		title: Gubun,
+		icon: {
+			content: contents_html,
+			size: new naver.maps.Size(38, 58),
+			anchor: new naver.maps.Point(19, 58),
+		},
+		draggable: false
+	});
+	return marker;
+};
+
+	function loadMarker_heatmap()
+	{
+<?
+	$SQL = " select code, lat, lng, gubun, time, serious from table_map ";
+	$result = mysqli_query($db_link, $SQL);
+	$idx = 0;
+	while($row = mysqli_fetch_array($result))
+	{
+		$idx++;
+		if($row["time"])
+		{
+			$time_arr = explode(" ", $row["time"]);
+			$date = $time_arr[0];
+			$time = $time_arr[1];
+		}
+
+		$ID = "".$idx;
+		?>
+//			var marker<?=$idx?> = new CustomMarker(<?=$row["lat"]?>, <?=$row["lng"]?>, "<?=$ID?>", "<?=$row["gubun"]?>", <?=$row["serious"]?>, "<?=$date?>", "<?=$_time?>");
+//			markers.push(marker<?=$idx?>);
+			heatmap_data.push(new naver.maps.LatLng(<?=$row["lat"]?>, <?=$row["lng"]?>));
+		<?
+	}
+?>
+//		return markers;
+	
+$(document).ready(function() {
+	loadeMarker_heatmap();
+	//markerCluster(tMarkers);
+	naver.maps.onJSContentLoaded = function() {
+		var heatmap = new naver.maps.visualization.HeatMap({
+			map: map,
+			data: heatmap_data
+		});
+	};
+	
+});
+
+function overe(childID)
+{
+	$("#"+childID).show();
+}
+
+function out(childID)
+{
+	$("#"+childID).hide();
+}
+</script>
+<?
+	include "dbend.php";
+?>
